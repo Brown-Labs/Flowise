@@ -1,0 +1,63 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write .env
+        env:
+          FLOWISE_IMAGE: ${{ secrets.FLOWISE_IMAGE }}
+          POSTGRES_IMAGE: ${{ secrets.FLOWISE_POSTGRES_IMAGE }}
+          FLOWISE_CPUS: ${{ secrets.FLOWISE_CPUS }}
+          FLOWISE_MEM_LIMIT: ${{ secrets.FLOWISE_MEM_LIMIT }}
+          FLOWISE_MEM_RESERVATION: ${{ secrets.FLOWISE_MEM_RESERVATION }}
+          POSTGRES_CPUS: ${{ secrets.FLOWISE_POSTGRES_CPUS }}
+          POSTGRES_MEM_LIMIT: ${{ secrets.FLOWISE_POSTGRES_MEM_LIMIT }}
+          POSTGRES_MEM_RESERVATION: ${{ secrets.FLOWISE_POSTGRES_MEM_RESERVATION }}
+          TZ: ${{ secrets.TZ }}
+          FLOWISE_HOST: ${{ secrets.FLOWISE_HOST }}
+          APP_URL: ${{ secrets.FLOWISE_APP_URL }}
+          CF_TUNNEL_TOKEN: ${{ secrets.FLOWISE_CF_TUNNEL_TOKEN }}
+          POSTGRES_DB: ${{ secrets.FLOWISE_POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.FLOWISE_POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.FLOWISE_POSTGRES_PASSWORD }}
+          FLOWISE_USERNAME: ${{ secrets.FLOWISE_USERNAME }}
+          FLOWISE_PASSWORD: ${{ secrets.FLOWISE_PASSWORD }}
+          JWT_AUTH_TOKEN_SECRET: ${{ secrets.FLOWISE_JWT_AUTH_TOKEN_SECRET }}
+          JWT_REFRESH_TOKEN_SECRET: ${{ secrets.FLOWISE_JWT_REFRESH_TOKEN_SECRET }}
+          EXPRESS_SESSION_SECRET: ${{ secrets.FLOWISE_EXPRESS_SESSION_SECRET }}
+          FLOWISE_SECRETKEY_OVERWRITE: ${{ secrets.FLOWISE_SECRETKEY_OVERWRITE }}
+          NUMBER_OF_PROXIES: ${{ secrets.FLOWISE_NUMBER_OF_PROXIES }}
+        run: |
+          printf 'FLOWISE_IMAGE=%s\nPOSTGRES_IMAGE=%s\nFLOWISE_CPUS=%s\nFLOWISE_MEM_LIMIT=%s\nFLOWISE_MEM_RESERVATION=%s\nPOSTGRES_CPUS=%s\nPOSTGRES_MEM_LIMIT=%s\nPOSTGRES_MEM_RESERVATION=%s\nTZ=%s\nFLOWISE_HOST=%s\nAPP_URL=%s\nCF_TUNNEL_TOKEN=%s\nPOSTGRES_DB=%s\nPOSTGRES_USER=%s\nPOSTGRES_PASSWORD=%s\nFLOWISE_USERNAME=%s\nFLOWISE_PASSWORD=%s\nJWT_AUTH_TOKEN_SECRET=%s\nJWT_REFRESH_TOKEN_SECRET=%s\nEXPRESS_SESSION_SECRET=%s\nFLOWISE_SECRETKEY_OVERWRITE=%s\nNUMBER_OF_PROXIES=%s\n' \
+            "$FLOWISE_IMAGE" "$POSTGRES_IMAGE" "$FLOWISE_CPUS" "$FLOWISE_MEM_LIMIT" "$FLOWISE_MEM_RESERVATION" \
+            "$POSTGRES_CPUS" "$POSTGRES_MEM_LIMIT" "$POSTGRES_MEM_RESERVATION" \
+            "$TZ" "$FLOWISE_HOST" "$APP_URL" "$CF_TUNNEL_TOKEN" \
+            "$POSTGRES_DB" "$POSTGRES_USER" "$POSTGRES_PASSWORD" \
+            "$FLOWISE_USERNAME" "$FLOWISE_PASSWORD" \
+            "$JWT_AUTH_TOKEN_SECRET" "$JWT_REFRESH_TOKEN_SECRET" \
+            "$EXPRESS_SESSION_SECRET" "$FLOWISE_SECRETKEY_OVERWRITE" "$NUMBER_OF_PROXIES" > .env
+      - name: Upload to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          source: "compose.yaml,.env"
+          target: "/home/parker/work/apps/flowise/"
+      - name: Restart service
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script: |
+            cd /home/parker/work/apps/flowise
+            docker compose pull
+            docker compose up -d

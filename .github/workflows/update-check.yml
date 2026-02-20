@@ -1,0 +1,75 @@
+name: Weekly Image Update Check
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install skopeo
+        run: sudo apt-get install -y skopeo -qq
+
+      - name: Check image digests
+        id: check
+        run: |
+          DIGEST_FILE=".github/image-digests.txt"
+          mkdir -p .github
+          touch "$DIGEST_FILE"
+          UPDATES=""
+
+          check_image() {
+            local name=$1
+            local img=$2
+            local digest
+            digest=$(skopeo inspect --raw "docker://$img" 2>/dev/null | sha256sum | cut -d' ' -f1 || echo "unavailable")
+            local old
+            old=$(grep "^$name=" "$DIGEST_FILE" 2>/dev/null | cut -d= -f2 || echo "")
+
+            if [ -n "$old" ] && [ "$digest" != "$old" ] && [ "$digest" != "unavailable" ]; then
+              echo "  🆕 UPDATE: $img"
+              UPDATES+="\n- \`$img\` has a new image available"
+            fi
+
+            if grep -q "^$name=" "$DIGEST_FILE"; then
+              sed -i "s|^$name=.*|$name=$digest|" "$DIGEST_FILE"
+            else
+              echo "$name=$digest" >> "$DIGEST_FILE"
+            fi
+          }
+
+          check_image "flowise" "flowiseai/flowise:latest"
+          check_image "postgres" "postgres:16"
+
+          echo "updates<<UPDATES_EOF" >> $GITHUB_OUTPUT
+          printf "%s" "$UPDATES" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "UPDATES_EOF" >> $GITHUB_OUTPUT
+
+      - name: Open issue if updates found
+        if: steps.check.outputs.updates != ''
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "🐳 Docker image updates available"
+          content-filepath: /dev/stdin
+          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          ISSUE_BODY: |
+            The following Docker images have new versions available:
+            ${{ steps.check.outputs.updates }}
+
+            Review the changes and trigger a deploy when ready.
+
+      - name: Commit digest file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/image-digests.txt
+          git diff --staged --quiet || git commit -m "chore: update image digest tracking [skip ci]" && git push

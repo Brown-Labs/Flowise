@@ -1,0 +1,119 @@
+services:
+  flowise-postgres:
+    image: ${POSTGRES_IMAGE}
+    restart: unless-stopped
+    cpus: "${POSTGRES_CPUS}"
+    mem_limit: "${POSTGRES_MEM_LIMIT}"
+    mem_reservation: "${POSTGRES_MEM_RESERVATION}"
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+    shm_size: 256m
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+      TZ: ${TZ}
+    volumes:
+      - flowise_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - flowise_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  flowise:
+    image: ${FLOWISE_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      flowise-postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    cpus: "${FLOWISE_CPUS}"
+    mem_limit: "${FLOWISE_MEM_LIMIT}"
+    mem_reservation: "${FLOWISE_MEM_RESERVATION}"
+    pids_limit: 1024
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    environment:
+      PORT: 3000
+      TZ: ${TZ}
+      FLOWISE_USERNAME: ${FLOWISE_USERNAME}
+      FLOWISE_PASSWORD: ${FLOWISE_PASSWORD}
+      JWT_AUTH_TOKEN_SECRET: ${JWT_AUTH_TOKEN_SECRET}
+      JWT_REFRESH_TOKEN_SECRET: ${JWT_REFRESH_TOKEN_SECRET}
+      EXPRESS_SESSION_SECRET: ${EXPRESS_SESSION_SECRET}
+      FLOWISE_SECRETKEY_OVERWRITE: ${FLOWISE_SECRETKEY_OVERWRITE}
+      NUMBER_OF_PROXIES: ${NUMBER_OF_PROXIES}
+      APP_URL: ${APP_URL}
+      DATABASE_TYPE: postgres
+      DATABASE_HOST: flowise-postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${POSTGRES_DB}
+      DATABASE_USER: ${POSTGRES_USER}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_SSL: "false"
+      DISABLE_FLOWISE_TELEMETRY: "true"
+    volumes:
+      - flowise_data:/root/.flowise
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const urls=['http://127.0.0.1:3000/api/v1/ping','http://127.0.0.1:3000/'];(async()=>{for(const u of urls){try{const r=await fetch(u);if(r.ok){process.exit(0);}}catch(e){}}process.exit(1);})();"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    networks:
+      - flowise_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on:
+      flowise:
+        condition: service_healthy
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN}
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - flowise_net
+      - n8n_n8n_net
+      - patchy-staging_patchy-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  flowise_data:
+  flowise_postgres_data:
+
+networks:
+  flowise_net:
+    driver: bridge
+  n8n_n8n_net:
+    external: true
+  patchy-staging_patchy-net:
+    external: true
